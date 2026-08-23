@@ -1,0 +1,118 @@
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    restart: unless-stopped
+    ports:
+      - "${OPEN_WEBUI_PORT:-3000}:8080"
+    volumes:
+      - open-webui-data:/app/backend/data
+    environment:
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?WEBUI_SECRET_KEY is required}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY is required}
+      OPENAI_API_BASE_URL: ${OPENAI_API_BASE_URL:-https://openrouter.ai/api/v1}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+      AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER: ${AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER:-900}
+    networks:
+      - mcp-internal
+      - egress
+    mem_limit: 1500m
+    mem_reservation: 512m      
+
+  chroma:
+    image: chromadb/chroma:1.5.3
+    restart: unless-stopped
+    volumes:
+      - chroma-data:/data
+    environment:
+      IS_PERSISTENT: "true"
+    networks:
+      - mcp-internal
+    healthcheck:
+      test: ["CMD", "/bin/bash", "-c", "</dev/tcp/localhost/8000"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    mem_limit: 1000m   
+
+  quality-mcp:
+    build:
+      context: .
+      dockerfile: services/quality-mcp/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      chroma:
+        condition: service_healthy
+    environment: &mcp-environment
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY is required}
+      OPENAI_API_BASE_URL: ${OPENAI_API_BASE_URL:-https://openrouter.ai/api/v1}
+      CHROMA_HOST: chroma
+      CHROMA_PORT: 8000
+      CHROMA_MEMORY_COLLECTION: ${CHROMA_MEMORY_COLLECTION:-chat_memory_v2}
+      USER_ID_HEADER: ${USER_ID_HEADER:-X-OpenWebUI-User-Id}
+      REQUIRE_USER_ID_HEADER: ${REQUIRE_USER_ID_HEADER:-true}
+      DEFAULT_USER_ID: ${DEFAULT_USER_ID:-development-only}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nvidia/nemotron-3-embed-1b:free}
+      LLM_TIMEOUT: ${LLM_TIMEOUT:-60}
+      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-4}
+      RECALL_RESULTS: ${RECALL_RESULTS:-3}
+      RECALL_MAX_DISTANCE: ${RECALL_MAX_DISTANCE:-0.60}
+      DEDUP_MAX_DISTANCE: ${DEDUP_MAX_DISTANCE:-0.05}
+      MEMORY_LIST_MAX_RESULTS: ${MEMORY_LIST_MAX_RESULTS:-50}
+      MEMORY_DELETE_RETENTION_DAYS: ${MEMORY_DELETE_RETENTION_DAYS:-30}
+      REFINER_MODEL: ${REFINER_MODEL:-nvidia/nemotron-3-super-120b-a12b:free}
+      RESPONDER_MODEL: ${RESPONDER_MODEL:-nvidia/nemotron-3-super-120b-a12b:free}
+      EVALUATOR_MODEL: ${EVALUATOR_MODEL:-nvidia/nemotron-3-super-120b-a12b:free}
+      MEMORY_MODEL: ${MEMORY_MODEL:-}
+      MAX_ITERATIONS: ${MAX_ITERATIONS:-3}
+      MAX_ITERATIONS_CAP: ${MAX_ITERATIONS_CAP:-6}
+      AGREEMENT_SCORE: ${AGREEMENT_SCORE:-9}
+      MEMORY_SCORE_THRESHOLD: ${MEMORY_SCORE_THRESHOLD:-8}
+      DECISION_SCORE_THRESHOLD: ${DECISION_SCORE_THRESHOLD:-4}
+      MAX_CONCURRENT_PIPELINES: ${MAX_CONCURRENT_PIPELINES:-2}
+      WEB_SEARCH_AGENTS: ${WEB_SEARCH_AGENTS:-}
+      WEB_SEARCH_ENGINE: ${WEB_SEARCH_ENGINE:-auto}
+      WEB_SEARCH_MAX_RESULTS: ${WEB_SEARCH_MAX_RESULTS:-5}
+      WEB_SEARCH_MAX_TOTAL_RESULTS: ${WEB_SEARCH_MAX_TOTAL_RESULTS:-10}
+      QUALITY_MCP_PORT: 8100
+      MEMORY_MCP_PORT: 8101
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    networks:
+      - mcp-internal
+      - egress
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; raise SystemExit(socket.create_connection(('localhost', 8100), 3) is None)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    mem_limit: 900m
+
+  memory-mcp:
+    build:
+      context: .
+      dockerfile: services/memory-mcp/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      chroma:
+        condition: service_healthy
+    environment: *mcp-environment
+    networks:
+      - mcp-internal
+      - egress
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; raise SystemExit(socket.create_connection(('localhost', 8101), 3) is None)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    mem_limit: 900m
+
+volumes:
+  chroma-data:
+  open-webui-data:
+
+networks:
+  mcp-internal:
+    internal: true
+  egress:

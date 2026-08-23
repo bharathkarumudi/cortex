@@ -1,0 +1,24 @@
+[project]
+name = "cortex"
+version = "0.1.0"
+description = "User-scoped quality and memory MCP services"
+requires-python = ">=3.11"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["services", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["cortex_common", "memory_mcp", "quality_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [
+  "services/common",
+  "services/quality-mcp",
+  "services/memory-mcp",
+]

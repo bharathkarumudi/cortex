@@ -1,0 +1,8 @@
+{
+  "include": ["services", "tests", "scripts"],
+  "extraPaths": [
+    "services/common",
+    "services/quality-mcp",
+    "services/memory-mcp"
+  ]
+}
