@@ -37,6 +37,15 @@ Cortex addresses these issues by implementing a quality review pipeline with per
 - Soft-delete functionality (30 days retention).
 - No cross-user data leakage.
 
+### Memory Use Cases
+
+Every memory record is tagged with a **use case** bucket (default: `chat`) alongside its content type. Buckets keep data from different applications organized in one collection while staying queryable together or separately:
+
+- **Global recall** - omitting `use_case` searches across all of a user's buckets, so the quality pipeline benefits from every memory source.
+- **Scoped recall** - passing `use_case` to `recall_memory` or `list_memories` restricts results to one bucket.
+- **Saving** - `save_memory` accepts an optional `use_case` (default `chat`); the same fact may intentionally be stored in multiple buckets.
+- **Adding a bucket** - extend `MemoryUseCase` in `services/common/cortex_common/models.py` (one line) when a new use case arrives.
+
 ## Key Features
 
 - **Multi-User Isolation** - Each user's memory is completely isolated from others.

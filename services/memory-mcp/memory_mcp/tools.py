@@ -23,14 +23,20 @@ def register_tools(
     """Register bounded memory tools that always derive identity from MCP context."""
 
     @mcp.tool()
-    def recall_memory(query: str, ctx: Context, limit: int | None = None) -> str:
-        """Search the caller's active long-term memory using semantic similarity."""
+    def recall_memory(
+        query: str, ctx: Context, limit: int | None = None, use_case: str | None = None
+    ) -> str:
+        """Search the caller's active long-term memory using semantic similarity.
+
+        Omit use_case to search across all use case buckets, or pass one (for
+        example "chat") to restrict results to that bucket.
+        """
         with timed_request_scope(logger):
             user_id = _user_id_or_error(ctx, settings, logger)
             if user_id is None:
                 return "A verified Open WebUI user identity is required."
             try:
-                hits = memory.recall(query=query, user_id=user_id, limit=limit)
+                hits = memory.recall(query=query, user_id=user_id, limit=limit, use_case=use_case)
             except ValueError as error:
                 return f"Invalid request: {error}"
             except Exception:
@@ -39,13 +45,16 @@ def register_tools(
             if not hits:
                 return "No relevant memories found."
             return "\n".join(
-                f"- id={hit.record.memory_id} [{hit.record.content_type}] {hit.record.text}"
+                f"- id={hit.record.memory_id} "
+                f"[{hit.record.use_case}/{hit.record.content_type}] {hit.record.text}"
                 for hit in hits
             )
 
     @mcp.tool()
-    def save_memory(text: str, ctx: Context, content_type: str = "fact") -> str:
-        """Save an idempotent durable memory for the caller only."""
+    def save_memory(
+        text: str, ctx: Context, content_type: str = "fact", use_case: str = "chat"
+    ) -> str:
+        """Save an idempotent durable memory for the caller only, tagged with a use case bucket."""
         with timed_request_scope(logger):
             user_id = _user_id_or_error(ctx, settings, logger)
             if user_id is None:
@@ -55,6 +64,7 @@ def register_tools(
                     text=text,
                     user_id=user_id,
                     content_type=content_type,
+                    use_case=use_case,
                 )
             except ValueError as error:
                 return f"Invalid request: {error}"
@@ -71,6 +81,7 @@ def register_tools(
         limit: int | None = None,
         content_type: str | None = None,
         include_deleted: bool = False,
+        use_case: str | None = None,
     ) -> str:
         """List a bounded set of the caller's own memory records and their IDs."""
         with timed_request_scope(logger):
@@ -83,6 +94,7 @@ def register_tools(
                     limit=limit,
                     content_type=content_type,
                     include_deleted=include_deleted,
+                    use_case=use_case,
                 )
             except ValueError as error:
                 return f"Invalid request: {error}"
@@ -148,12 +160,17 @@ def register_tools(
                 )
                 or "none"
             )
+            by_use_case = (
+                ", ".join(f"{use_case}={count}" for use_case, count in status.by_use_case.items())
+                or "none"
+            )
             return "\n".join(
                 [
                     "memory-mcp: up",
                     f"active memories: {status.active_count}",
                     f"deleted memories: {status.deleted_count}",
                     f"active by content type: {by_type}",
+                    f"active by use case: {by_use_case}",
                 ]
             )
 
@@ -169,6 +186,6 @@ def _user_id_or_error(context: Context, settings: Settings, logger: logging.Logg
 def _format_record(record: MemoryRecord) -> str:
     deletion_state = "deleted" if record.deleted else "active"
     return (
-        f"- id={record.memory_id} [{deletion_state}/{record.content_type}] "
+        f"- id={record.memory_id} [{deletion_state}/{record.use_case}/{record.content_type}] "
         f"created={record.created_at} text={record.text}"
     )

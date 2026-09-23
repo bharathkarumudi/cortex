@@ -105,7 +105,7 @@ class Settings:
         if memory_score_threshold > 10 or decision_score_threshold > 10:
             raise ConfigurationError("memory score thresholds must be at most 10")
 
-        recall_max_distance = _float("RECALL_MAX_DISTANCE", 0.60)
+        recall_max_distance = _float("RECALL_MAX_DISTANCE", 0.70)
         dedup_max_distance = _float("DEDUP_MAX_DISTANCE", 0.05)
         if recall_max_distance > 2 or dedup_max_distance > 2:
             raise ConfigurationError("cosine distances must be between 0 and 2")
@@ -151,7 +151,7 @@ class Settings:
             ).strip(),
             llm_timeout_seconds=_float("LLM_TIMEOUT", 60.0, minimum=0.1),
             llm_max_retries=_integer("LLM_MAX_RETRIES", 4, minimum=0),
-            recall_results=_integer("RECALL_RESULTS", 3),
+            recall_results=_integer("RECALL_RESULTS", 5),
             recall_max_distance=recall_max_distance,
             dedup_max_distance=dedup_max_distance,
             memory_list_max_results=_integer("MEMORY_LIST_MAX_RESULTS", 50),

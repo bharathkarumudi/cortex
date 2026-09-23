@@ -8,6 +8,15 @@ from typing import Literal
 
 MemoryContentType = Literal["decision", "fact", "general_chat", "note"]
 PipelineContentType = Literal["decision", "fact", "general_chat"]
+MemoryUseCase = Literal["chat", "digital_twin"]
+DEFAULT_USE_CASE: MemoryUseCase = "chat"
+
+
+def memory_use_case(value: object) -> MemoryUseCase:
+    """Narrow a stored metadata value to a known use case, defaulting to chat."""
+    if value == "digital_twin":
+        return "digital_twin"
+    return "chat"
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +47,7 @@ class MemoryRecord:
     deleted_at: str | None
     delete_reason: str | None
     schema_version: int = 2
+    use_case: MemoryUseCase = DEFAULT_USE_CASE
 
     @classmethod
     def create(
@@ -49,6 +59,7 @@ class MemoryRecord:
         content_type: MemoryContentType,
         source: str,
         now: datetime,
+        use_case: MemoryUseCase = DEFAULT_USE_CASE,
     ) -> MemoryRecord:
         """Create a new active record using UTC ISO timestamps."""
         timestamp = now.isoformat()
@@ -65,6 +76,8 @@ class MemoryRecord:
             deleted=False,
             deleted_at=None,
             delete_reason=None,
+            schema_version=3,
+            use_case=use_case,
         )
 
     def metadata(self) -> dict[str, bool | int | str]:
@@ -72,6 +85,7 @@ class MemoryRecord:
         metadata: dict[str, bool | int | str] = {
             "schema_version": self.schema_version,
             "user_id": self.user_id,
+            "use_case": self.use_case,
             "content_type": self.content_type,
             "source": self.source,
             "created_at": self.created_at,
@@ -112,6 +126,7 @@ class MemoryStatus:
     active_count: int
     deleted_count: int
     by_content_type: dict[str, int]
+    by_use_case: dict[str, int]
 
 
 @dataclass(frozen=True, slots=True)

@@ -33,13 +33,16 @@ class FakeRepository:
         vector: list[float],
         user_id: str,
         limit: int,
-        include_deleted: bool,
+        use_case: str | None = None,
+        include_deleted: bool = False,
     ) -> list[MemorySearchHit]:
         del vector
         return [
             hit
             for hit in self.search_hits
-            if hit.record.user_id == user_id and (include_deleted or not hit.record.deleted)
+            if hit.record.user_id == user_id
+            and (include_deleted or not hit.record.deleted)
+            and (use_case is None or hit.record.use_case == use_case)
         ][:limit]
 
     def get_owned(self, *, memory_id: str, user_id: str) -> MemoryRecord | None:
@@ -53,6 +56,7 @@ class FakeRepository:
         limit: int,
         include_deleted: bool,
         content_type: str | None,
+        use_case: str | None = None,
     ) -> list[MemoryRecord]:
         return [
             record
@@ -60,6 +64,7 @@ class FakeRepository:
             if record.user_id == user_id
             and (include_deleted or not record.deleted)
             and (content_type is None or record.content_type == content_type)
+            and (use_case is None or record.use_case == use_case)
         ][:limit]
 
     def upsert(self, *, record: MemoryRecord, vector: list[float]) -> None:
@@ -169,3 +174,89 @@ def test_recall_updates_only_matching_user_access_metadata(settings) -> None:
 
     assert len(hits) == 1
     assert repository.records[saved.memory_id].access_count == 1
+
+
+def test_same_text_in_different_use_cases_creates_distinct_records(settings) -> None:
+    service, repository = _service(settings)
+
+    chat_result = service.save_direct(text="I value privacy.", user_id="user-a")
+    twin_result = service.save_direct(
+        text="I value privacy.", user_id="user-a", use_case="digital_twin"
+    )
+
+    assert chat_result.created and twin_result.created
+    assert chat_result.memory_id != twin_result.memory_id
+    assert len(repository.records) == 2
+
+
+def test_same_text_in_same_use_case_is_duplicate(settings) -> None:
+    service, repository = _service(settings)
+
+    first = service.save_direct(text="I value privacy.", user_id="user-a")
+    second = service.save_direct(text="I value privacy.", user_id="user-a")
+
+    assert first.created
+    assert second.duplicate and not second.created
+    assert second.memory_id == first.memory_id
+    assert len(repository.records) == 1
+
+
+def test_recall_scoped_to_use_case_and_global_by_default(settings) -> None:
+    service, repository = _service(settings)
+    chat_saved = service.save_direct(text="Chat memory", user_id="user-a")
+    twin_saved = service.save_direct(text="Twin memory", user_id="user-a", use_case="digital_twin")
+    repository.search_hits = [
+        MemorySearchHit(record=repository.records[chat_saved.memory_id], distance=0.1),
+        MemorySearchHit(record=repository.records[twin_saved.memory_id], distance=0.1),
+    ]
+
+    chat_hits = service.recall(query="memory", user_id="user-a", use_case="chat")
+    assert [hit.record.memory_id for hit in chat_hits] == [chat_saved.memory_id]
+
+    all_hits = service.recall(query="memory", user_id="user-a")
+    assert {hit.record.memory_id for hit in all_hits} == {
+        chat_saved.memory_id,
+        twin_saved.memory_id,
+    }
+
+
+def test_recall_preserves_use_case_on_access_update(settings) -> None:
+    service, repository = _service(settings)
+    saved = service.save_direct(text="Twin memory", user_id="user-a", use_case="digital_twin")
+    repository.search_hits = [
+        MemorySearchHit(record=repository.records[saved.memory_id], distance=0.1)
+    ]
+
+    service.recall(query="twin", user_id="user-a")
+
+    updated = repository.records[saved.memory_id]
+    assert updated.use_case == "digital_twin"
+    assert updated.access_count == 1
+
+
+def test_invalid_use_case_is_rejected(settings) -> None:
+    service, _ = _service(settings)
+
+    with pytest.raises(ValueError, match="use_case"):
+        service.save_direct(text="fact", user_id="user-a", use_case="unknown")
+    with pytest.raises(ValueError, match="use_case"):
+        service.recall(query="fact", user_id="user-a", use_case="unknown")
+    with pytest.raises(ValueError, match="use_case"):
+        service.list_memories(
+            user_id="user-a",
+            limit=None,
+            content_type=None,
+            include_deleted=False,
+            use_case="unknown",
+        )
+
+
+def test_status_aggregates_by_use_case(settings) -> None:
+    service, _ = _service(settings)
+    service.save_direct(text="Chat fact", user_id="user-a")
+    service.save_direct(text="Twin fact", user_id="user-a", use_case="digital_twin")
+
+    status = service.status(user_id="user-a")
+
+    assert status.active_count == 2
+    assert status.by_use_case == {"chat": 1, "digital_twin": 1}
