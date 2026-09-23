@@ -111,6 +111,7 @@ services:
 volumes:
   chroma-data:
   open-webui-data:
+    name: cortex_open-webui
 
 networks:
   mcp-internal:
