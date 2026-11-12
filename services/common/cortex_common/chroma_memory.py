@@ -10,7 +10,12 @@ from typing import Any
 import chromadb
 
 from cortex_common.config import ConfigurationError, Settings
-from cortex_common.models import MemoryRecord, MemorySearchHit
+from cortex_common.models import (
+    DEFAULT_USE_CASE,
+    MemoryRecord,
+    MemorySearchHit,
+    memory_use_case,
+)
 
 
 class ChromaMemoryRepository:
@@ -38,14 +43,18 @@ class ChromaMemoryRepository:
         vector: list[float],
         user_id: str,
         limit: int,
+        use_case: str | None = None,
         include_deleted: bool = False,
     ) -> list[MemorySearchHit]:
         """Run a semantic search that cannot leave the caller's user partition."""
+        where = self._where(user_id, include_deleted)
+        if use_case:
+            where = {"$and": [where, {"use_case": use_case}]}
         results = self._get_collection().query(
             query_embeddings=[vector],
             n_results=limit,
             include=["documents", "metadatas", "distances"],
-            where=self._where(user_id, include_deleted),
+            where=where,
         )
         ids = results.get("ids", [[]])[0]
         documents = results.get("documents", [[]])[0]
@@ -82,11 +91,14 @@ class ChromaMemoryRepository:
         limit: int,
         include_deleted: bool,
         content_type: str | None,
+        use_case: str | None = None,
     ) -> list[MemoryRecord]:
         """List bounded caller-owned records using only supported internal filters."""
         where = self._where(user_id, include_deleted)
         if content_type:
             where = {"$and": [where, {"content_type": content_type}]}
+        if use_case:
+            where = {"$and": [where, {"use_case": use_case}]}
         results = self._get_collection().get(
             where=where,
             limit=limit,
@@ -159,6 +171,7 @@ class ChromaMemoryRepository:
             memory_id=memory_id,
             text=document,
             user_id=str(values["user_id"]),
+            use_case=memory_use_case(values.get("use_case", DEFAULT_USE_CASE)),
             content_type=str(values["content_type"]),
             source=str(values["source"]),
             created_at=str(values["created_at"]),

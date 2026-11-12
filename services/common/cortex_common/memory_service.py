@@ -5,17 +5,21 @@ from __future__ import annotations
 import hashlib
 import threading
 from collections import Counter
+from dataclasses import replace
 from datetime import UTC, datetime
-from typing import ClassVar, Protocol
+from typing import ClassVar, Protocol, get_args
 
 from cortex_common.chroma_memory import ChromaMemoryRepository
 from cortex_common.config import Settings
 from cortex_common.models import (
+    DEFAULT_USE_CASE,
     MemoryContentType,
     MemoryRecord,
     MemorySearchHit,
     MemoryStatus,
+    MemoryUseCase,
     MemoryWriteResult,
+    memory_use_case,
 )
 
 
@@ -49,6 +53,7 @@ class MemoryService:
     """Domain service shared by the quality pipeline and memory MCP tools."""
 
     _DIRECT_TYPES: ClassVar[set[str]] = {"decision", "fact", "note"}
+    _USE_CASES: ClassVar[set[str]] = set(get_args(MemoryUseCase))
 
     def __init__(
         self,
@@ -73,6 +78,7 @@ class MemoryService:
         query: str,
         user_id: str,
         limit: int | None = None,
+        use_case: str | None = None,
     ) -> list[MemorySearchHit]:
         """Return relevant active memories and update only their caller-owned access metadata."""
         normalized_query = self._require_text(query, "query")
@@ -82,6 +88,7 @@ class MemoryService:
             vector=vector,
             user_id=user_id,
             limit=requested_limit,
+            use_case=self._require_use_case(use_case) if use_case is not None else None,
             include_deleted=False,
         )
         accepted_hits = [hit for hit in hits if hit.distance <= self._settings.recall_max_distance]
@@ -93,7 +100,7 @@ class MemoryService:
             for hit in accepted_hits:
                 record = hit.record
                 self._repository.update(
-                    self._replace(
+                    replace(
                         record,
                         access_count=record.access_count + 1,
                         last_accessed=accessed_at,
@@ -108,6 +115,7 @@ class MemoryService:
         text: str,
         user_id: str,
         content_type: str = "fact",
+        use_case: str = DEFAULT_USE_CASE,
     ) -> MemoryWriteResult:
         """Validate and idempotently store caller-supplied durable context."""
         if content_type not in self._DIRECT_TYPES:
@@ -118,6 +126,7 @@ class MemoryService:
             user_id=user_id,
             content_type=content_type,
             source="direct",
+            use_case=self._require_use_case(use_case),
         )
 
     def save_quality(
@@ -141,6 +150,7 @@ class MemoryService:
             user_id=user_id,
             content_type=content_type,
             source="quality_pipeline",
+            use_case=DEFAULT_USE_CASE,
         )
 
     def list_memories(
@@ -150,6 +160,7 @@ class MemoryService:
         limit: int | None,
         content_type: str | None,
         include_deleted: bool,
+        use_case: str | None = None,
     ) -> list[MemoryRecord]:
         """List only the calling user's records with bounded output."""
         if content_type is not None and content_type not in {*self._DIRECT_TYPES, "general_chat"}:
@@ -159,6 +170,7 @@ class MemoryService:
             limit=self._bounded_limit(limit, self._settings.memory_list_max_results),
             include_deleted=include_deleted,
             content_type=content_type,
+            use_case=self._require_use_case(use_case) if use_case is not None else None,
         )
 
     def delete(self, *, memory_id: str, user_id: str, reason: str = "") -> MemoryRecord:
@@ -173,10 +185,12 @@ class MemoryService:
         """Return aggregate status only for the requesting user's partition."""
         records = list(self._repository.counts_for_user(user_id=user_id))
         by_content_type = Counter(record.content_type for record in records if not record.deleted)
+        by_use_case = Counter(record.use_case for record in records if not record.deleted)
         return MemoryStatus(
             active_count=sum(not record.deleted for record in records),
             deleted_count=sum(record.deleted for record in records),
             by_content_type=dict(sorted(by_content_type.items())),
+            by_use_case=dict(sorted(by_use_case.items())),
         )
 
     def _store(
@@ -186,10 +200,11 @@ class MemoryService:
         user_id: str,
         content_type: MemoryContentType,
         source: str,
+        use_case: MemoryUseCase,
     ) -> MemoryWriteResult:
         normalized_text = self._require_text(text, "text")
         vector = self._embeddings.embed_one(normalized_text)
-        memory_id = self._stable_id(user_id, content_type, normalized_text)
+        memory_id = self._stable_id(user_id, use_case, content_type, normalized_text)
         with self._write_locks.for_user(user_id):
             existing = self._repository.get_owned(memory_id=memory_id, user_id=user_id)
             if existing and not existing.deleted:
@@ -199,6 +214,7 @@ class MemoryService:
                 vector=vector,
                 user_id=user_id,
                 limit=1,
+                use_case=use_case,
                 include_deleted=False,
             )
             if nearest and nearest[0].distance <= self._settings.dedup_max_distance:
@@ -215,6 +231,7 @@ class MemoryService:
                 content_type=content_type,
                 source=source,
                 now=self._now(),
+                use_case=use_case,
             )
             self._repository.upsert(record=record, vector=vector)
             return MemoryWriteResult(memory_id=memory_id, created=True, duplicate=False)
@@ -234,7 +251,7 @@ class MemoryService:
             if record is None:
                 raise MemoryNotFoundError("memory not found")
             now = self._now().isoformat()
-            updated_record = self._replace(
+            updated_record = replace(
                 record,
                 deleted=deleted,
                 deleted_at=now if deleted else None,
@@ -261,6 +278,13 @@ class MemoryService:
             raise ValueError(f"{field} must be 10000 characters or fewer")
         return normalized
 
+    def _require_use_case(self, value: str) -> MemoryUseCase:
+        normalized = " ".join(value.split()).lower()
+        if normalized not in self._USE_CASES:
+            allowed = ", ".join(sorted(self._USE_CASES))
+            raise ValueError(f"use_case must be one of: {allowed}")
+        return memory_use_case(normalized)
+
     @staticmethod
     def _require_reason(value: str) -> str:
         normalized = " ".join(value.split())
@@ -269,28 +293,10 @@ class MemoryService:
         return normalized
 
     @staticmethod
-    def _replace(record: MemoryRecord, **changes: object) -> MemoryRecord:
-        values = {
-            "memory_id": record.memory_id,
-            "text": record.text,
-            "user_id": record.user_id,
-            "content_type": record.content_type,
-            "source": record.source,
-            "created_at": record.created_at,
-            "updated_at": record.updated_at,
-            "access_count": record.access_count,
-            "last_accessed": record.last_accessed,
-            "deleted": record.deleted,
-            "deleted_at": record.deleted_at,
-            "delete_reason": record.delete_reason,
-            "schema_version": record.schema_version,
-        }
-        values.update(changes)
-        return MemoryRecord(**values)
-
-    @staticmethod
-    def _stable_id(user_id: str, content_type: MemoryContentType, text: str) -> str:
-        payload = f"v2|{user_id}|{content_type}|{text}".encode()
+    def _stable_id(
+        user_id: str, use_case: MemoryUseCase, content_type: MemoryContentType, text: str
+    ) -> str:
+        payload = f"v3|{user_id}|{use_case}|{content_type}|{text}".encode()
         return hashlib.sha256(payload).hexdigest()
 
     @staticmethod

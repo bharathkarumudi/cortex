@@ -55,8 +55,8 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nvidia/nemotron-3-embed-1b:free}
       LLM_TIMEOUT: ${LLM_TIMEOUT:-60}
       LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-4}
-      RECALL_RESULTS: ${RECALL_RESULTS:-3}
-      RECALL_MAX_DISTANCE: ${RECALL_MAX_DISTANCE:-0.60}
+      RECALL_RESULTS: ${RECALL_RESULTS:-5}
+      RECALL_MAX_DISTANCE: ${RECALL_MAX_DISTANCE:-0.70}
       DEDUP_MAX_DISTANCE: ${DEDUP_MAX_DISTANCE:-0.05}
       MEMORY_LIST_MAX_RESULTS: ${MEMORY_LIST_MAX_RESULTS:-50}
       MEMORY_DELETE_RETENTION_DAYS: ${MEMORY_DELETE_RETENTION_DAYS:-30}
@@ -111,6 +111,7 @@ services:
 volumes:
   chroma-data:
   open-webui-data:
+    name: cortex_open-webui
 
 networks:
   mcp-internal:
