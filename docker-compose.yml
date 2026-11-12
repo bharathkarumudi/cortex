@@ -5,7 +5,7 @@ services:
     ports:
       - "${OPEN_WEBUI_PORT:-3000}:8080"
     volumes:
-      - open-webui-data:/app/backend/data
+      - ${OPEN_WEBUI_DATA_DIR:-/opt/data/open-webui}:/app/backend/data
     environment:
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?WEBUI_SECRET_KEY is required}
       OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY is required}
@@ -19,10 +19,10 @@ services:
     mem_reservation: 512m      
 
   chroma:
-    image: chromadb/chroma:1.5.3
+    image: chromadb/chroma:1.5.10.dev326-amd64
     restart: unless-stopped
     volumes:
-      - chroma-data:/data
+      - ${CHROMA_DATA_DIR:-/opt/data/chroma}:/data
     environment:
       IS_PERSISTENT: "true"
     networks:
@@ -107,11 +107,6 @@ services:
       retries: 3
       start_period: 15s
     mem_limit: 900m
-
-volumes:
-  chroma-data:
-  open-webui-data:
-    name: cortex_open-webui
 
 networks:
   mcp-internal:
