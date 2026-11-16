@@ -81,6 +81,7 @@ class QualityPipeline:
                 f"evaluator: {self._settings.evaluator_model}",
                 f"memory summarizer: {self._settings.memory_model}",
                 f"max concurrent pipelines: {self._settings.max_concurrent_pipelines}",
+                f"time budget: {self._settings.pipeline_time_budget:g}s (0 disables)",
                 f"max iterations: {self._settings.max_iterations}",
                 f"agreement score: {self._settings.agreement_score}",
             ]
@@ -116,8 +117,18 @@ class QualityPipeline:
         best_answer = ""
         best_verdict: Verdict | None = None
         previous_score: int | None = None
+        time_budget_hit = False
 
         for attempt in range(1, max_iterations + 1):
+            if self._time_budget_exhausted(started_at):
+                time_budget_hit = True
+                self._logger.info(
+                    "time budget of %.0fs reached; stopping before attempt %d/%d",
+                    self._settings.pipeline_time_budget,
+                    attempt,
+                    max_iterations,
+                )
+                break
             stage_started_at = time.perf_counter()
             try:
                 answer = self._agents.respond(
@@ -202,10 +213,15 @@ class QualityPipeline:
             best_verdict.score,
         )
         concern = best_verdict.feedback.strip() or "unspecified"
+        budget_note = ", stopped by time budget" if time_budget_hit else ""
         return (
-            f"{best_answer}\n\n[no reviewer consensus (best score: {best_verdict.score}/10) "
-            f"-- open concern: {concern}]"
+            f"{best_answer}\n\n[no reviewer consensus (best score: {best_verdict.score}/10"
+            f"{budget_note}) -- open concern: {concern}]"
         )
+
+    def _time_budget_exhausted(self, started_at: float) -> bool:
+        budget = self._settings.pipeline_time_budget
+        return budget > 0 and time.perf_counter() - started_at >= budget
 
     def _refine_or_original(self, question: str) -> str:
         try:

@@ -80,6 +80,8 @@ class Settings:
     memory_score_threshold: int
     decision_score_threshold: int
     max_concurrent_pipelines: int
+    pipeline_time_budget: float
+    heartbeat_interval: float
     web_search_agents: frozenset[str]
     web_search_engine: str
     web_search_max_results: int
@@ -166,6 +168,8 @@ class Settings:
             memory_score_threshold=memory_score_threshold,
             decision_score_threshold=decision_score_threshold,
             max_concurrent_pipelines=_integer("MAX_CONCURRENT_PIPELINES", 2),
+            pipeline_time_budget=_float("QUALITY_PIPELINE_TIME_BUDGET", 600.0),
+            heartbeat_interval=_float("QUALITY_HEARTBEAT_SECONDS", 20.0, minimum=5.0),
             web_search_agents=configured_search_agents,
             web_search_engine=environ.get("WEB_SEARCH_ENGINE", "auto").strip(),
             web_search_max_results=_integer("WEB_SEARCH_MAX_RESULTS", 5),
